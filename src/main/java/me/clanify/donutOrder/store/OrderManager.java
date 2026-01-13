@@ -52,15 +52,15 @@ public class OrderManager {
         if (!pl.getDataFolder().exists()) {
             pl.getDataFolder().mkdirs();
         }
-        this.ordersFile = new File(pl.getDataFolder(), "orders.yml");
-        this.legacyFile = new File(pl.getDataFolder(), "saves.yml");
+        this.ordersFile = new File(pl.getDataFolder(), "orders.db");
+        this.legacyFile = new File(pl.getDataFolder(), "saves.db");
         if (!this.ordersFile.exists() && this.legacyFile.exists()) {
-            pl.getLogger().info("Migrating orders from saves.yml -> orders.yml ...");
+            pl.getLogger().info("Migrating orders from saves.db -> orders.db ...");
             YamlConfiguration legacyCfg = null;
             try {
                 legacyCfg = YamlConfiguration.loadConfiguration((File) this.legacyFile);
             } catch (Exception e) {
-                pl.getLogger().severe("Could not split-load saves.yml: " + e.getMessage());
+                pl.getLogger().severe("Could not split-load saves.db: " + e.getMessage());
             }
 
             try {
@@ -76,9 +76,9 @@ public class OrderManager {
                 }
                 try {
                     newCfg.save(this.ordersFile);
-                    pl.getLogger().info("Migration complete. (orders.yml created)");
+                    pl.getLogger().info("Migration complete. (orders.db created)");
                 } catch (IOException ex) {
-                    pl.getLogger().severe("Failed to migrate orders to orders.yml: " + ex.getMessage());
+                    pl.getLogger().severe("Failed to migrate orders to orders.db: " + ex.getMessage());
                 }
             }
         }
@@ -86,14 +86,14 @@ public class OrderManager {
             try {
                 this.ordersFile.createNewFile();
             } catch (IOException ex) {
-                pl.getLogger().severe("Could not create orders.yml: " + ex.getMessage());
+                pl.getLogger().severe("Could not create orders.db: " + ex.getMessage());
             }
         }
         YamlConfiguration tmp = new YamlConfiguration();
         try {
             tmp = YamlConfiguration.loadConfiguration((File) this.ordersFile);
         } catch (Exception e) {
-            pl.getLogger().severe("Could not load orders.yml: " + e.getMessage());
+            pl.getLogger().severe("Could not load orders.db: " + e.getMessage());
         }
         this.ordersCfg = tmp;
         this.loadAll();
