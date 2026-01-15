@@ -95,6 +95,23 @@ public class DeliverItemsMenu
             ItemStack it = this.inv.getItem(i);
             if (it == null || it.getType() == Material.AIR)
                 continue;
+            if (key.matches(it)) {
+                int can = Math.min(need - acceptedAmount, it.getAmount());
+                if (can > 0) {
+                    ItemStack clone = it.clone();
+                    clone.setAmount(can);
+                    accepted.add(clone);
+                    acceptedAmount += can;
+                    if (it.getAmount() <= can)
+                        continue;
+                    ItemStack left = it.clone();
+                    left.setAmount(it.getAmount() - can);
+                    returns.add(left);
+                    continue;
+                }
+                returns.add(it);
+                continue;
+            }
             if (DeliverItemsMenu.isShulker(it)) {
                 ItemStack[] cont;
                 BlockStateMeta meta = (BlockStateMeta) it.getItemMeta();
@@ -115,23 +132,6 @@ public class DeliverItemsMenu
                 box.getInventory().setContents(cont);
                 meta.setBlockState((BlockState) box);
                 it.setItemMeta((ItemMeta) meta);
-                returns.add(it);
-                continue;
-            }
-            if (key.matches(it)) {
-                int can = Math.min(need - acceptedAmount, it.getAmount());
-                if (can > 0) {
-                    ItemStack clone = it.clone();
-                    clone.setAmount(can);
-                    accepted.add(clone);
-                    acceptedAmount += can;
-                    if (it.getAmount() <= can)
-                        continue;
-                    ItemStack left = it.clone();
-                    left.setAmount(it.getAmount() - can);
-                    returns.add(left);
-                    continue;
-                }
                 returns.add(it);
                 continue;
             }

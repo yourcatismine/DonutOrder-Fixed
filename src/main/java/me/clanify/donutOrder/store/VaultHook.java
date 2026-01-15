@@ -24,7 +24,7 @@ public class VaultHook {
         }
         RegisteredServiceProvider rsp = plugin.getServer().getServicesManager().getRegistration(Economy.class);
         if (rsp != null) {
-            this.econ = (Economy)rsp.getProvider();
+            this.econ = (Economy) rsp.getProvider();
         }
     }
 
@@ -44,8 +44,7 @@ public class VaultHook {
         }
         try {
             return this.econ.has(p, amount);
-        }
-        catch (Throwable ignored) {
+        } catch (Throwable ignored) {
             return this.bal(p) + 1.0E-9 >= amount;
         }
     }
@@ -65,8 +64,7 @@ public class VaultHook {
         }
         try {
             return this.econ.withdrawPlayer(p, amount).transactionSuccess();
-        }
-        catch (Throwable t) {
+        } catch (Throwable t) {
             this.plugin.getLogger().warning("Vault withdraw failed: " + t.getMessage());
             return false;
         }
@@ -84,8 +82,7 @@ public class VaultHook {
         }
         try {
             return this.econ.depositPlayer(p, amount).transactionSuccess();
-        }
-        catch (Throwable t) {
+        } catch (Throwable t) {
             this.plugin.getLogger().warning("Vault deposit failed: " + t.getMessage());
             return false;
         }
@@ -97,11 +94,9 @@ public class VaultHook {
         }
         try {
             return this.econ.getBalance(p);
-        }
-        catch (Throwable t) {
+        } catch (Throwable t) {
             this.plugin.getLogger().warning("Vault getBalance failed: " + t.getMessage());
             return 0.0;
         }
     }
 }
-

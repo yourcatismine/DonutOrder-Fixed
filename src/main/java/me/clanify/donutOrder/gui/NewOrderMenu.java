@@ -53,8 +53,8 @@ import org.bukkit.metadata.MetadataValue;
 import org.bukkit.plugin.Plugin;
 
 public class NewOrderMenu
-implements InventoryHolder,
-MenuOwner {
+        implements InventoryHolder,
+        MenuOwner {
     private static final String META_CHOSEN = "donutorder.tmpChosenStack";
     private static final String META_SUPPRESS_CLOSE = "donutorder.suppressClose";
     private final DonutOrder pl;
@@ -93,38 +93,49 @@ MenuOwner {
             s.priceEach = 1.0;
         }
         ItemStack chosenStack = null;
-        if (this.p.hasMetadata(META_CHOSEN) && (obj = ((MetadataValue)this.p.getMetadata(META_CHOSEN).get(0)).value()) instanceof ItemStack) {
-            ItemStack is = (ItemStack)obj;
+        if (this.p.hasMetadata(META_CHOSEN)
+                && (obj = ((MetadataValue) this.p.getMetadata(META_CHOSEN).get(0)).value()) instanceof ItemStack) {
+            ItemStack is = (ItemStack) obj;
             chosenStack = is.clone();
         }
-        Material material = mat = chosenStack != null ? chosenStack.getType() : Material.matchMaterial((String)s.chosenItem);
+        Material material = mat = chosenStack != null ? chosenStack.getType()
+                : Material.matchMaterial((String) s.chosenItem);
         if (mat == null) {
             mat = Material.STONE;
         }
         if (skipOnce = this.p.hasMetadata("donutorder.skipEnchantOnce")) {
-            this.p.removeMetadata("donutorder.skipEnchantOnce", (Plugin)this.pl);
+            this.p.removeMetadata("donutorder.skipEnchantOnce", (Plugin) this.pl);
         }
         if (!skipOnce && this.pl.ench().hasOptionsFor(mat) && !NewOrderMenu.hasAnyEnchants(chosenStack)) {
             new EnchantSelectMenu(this.pl, this.p, new ItemStack(mat)).open();
             return;
         }
-        String label = chosenStack != null && chosenStack.getItemMeta() != null && chosenStack.getItemMeta().hasDisplayName() ? chosenStack.getItemMeta().getDisplayName().replace("\u00a7", "&") : OrderManager.nice(mat);
+        String label = chosenStack != null && chosenStack.getItemMeta() != null
+                && chosenStack.getItemMeta().hasDisplayName()
+                        ? chosenStack.getItemMeta().getDisplayName().replace("\u00a7", "&")
+                        : OrderManager.nice(mat);
         int rows = this.pl.cfg().rows("new", 3);
-        this.inv = Bukkit.createInventory((InventoryHolder)this, (int)(rows * 9), (String)this.pl.cfg().title("new", "&#44b3ffOrders -> New Order"));
-        this.inv.setItem(10, this.pl.cfg().button("gui.new.items.cancel", "RED_STAINED_GLASS_PANE", "&cCancel", List.of("&fClick to return")));
+        this.inv = Bukkit.createInventory((InventoryHolder) this, (int) (rows * 9),
+                (String) this.pl.cfg().title("new", "&#44b3ffOrders -> New Order"));
+        this.inv.setItem(10, this.pl.cfg().button("gui.new.items.cancel", "RED_STAINED_GLASS_PANE", "&cCancel",
+                List.of("&fClick to return")));
         HashMap<String, String> ph = new HashMap<String, String>();
         ph.put("item", label);
         ph.put("amount", Utils.abbr(s.amount.intValue()));
         ph.put("price_each", Utils.abbr(s.priceEach));
-        ph.put("total", Utils.abbr((double)s.amount.intValue() * s.priceEach));
-        ItemStack itemTile = this.pl.cfg().dynamicItem(mat, "gui.new.items.item", "&fITEM", List.of("&fClick to choose item", "&7({item})"), ph);
+        ph.put("total", Utils.abbr((double) s.amount.intValue() * s.priceEach));
+        ItemStack itemTile = this.pl.cfg().dynamicItem(mat, "gui.new.items.item", "&fITEM",
+                List.of("&fClick to choose item", "&7({item})"), ph);
         if (chosenStack != null) {
             itemTile = GuiVariant.merge(itemTile, chosenStack);
         }
         this.inv.setItem(12, itemTile);
-        this.inv.setItem(13, this.pl.cfg().dynamicItem(Material.CHEST, "gui.new.items.amount", "&fAMOUNT", List.of("&fClick to type number of items", "&7({amount})"), ph));
-        this.inv.setItem(14, this.pl.cfg().dynamicItem(Material.EMERALD, "gui.new.items.price", "&fPRICE", List.of("&fClick to type the price per item", "&7(${price_each})"), ph));
-        this.inv.setItem(16, this.pl.cfg().dynamicItem(Material.LIME_STAINED_GLASS_PANE, "gui.new.items.confirm", "&aCONFIRM", List.of("&fClick to confirm order", "&7(Total: ${total})"), ph));
+        this.inv.setItem(13, this.pl.cfg().dynamicItem(Material.CHEST, "gui.new.items.amount", "&fAMOUNT",
+                List.of("&fClick to type number of items", "&7({amount})"), ph));
+        this.inv.setItem(14, this.pl.cfg().dynamicItem(Material.EMERALD, "gui.new.items.price", "&fPRICE",
+                List.of("&fClick to type the price per item", "&7(${price_each})"), ph));
+        this.inv.setItem(16, this.pl.cfg().dynamicItem(Material.LIME_STAINED_GLASS_PANE, "gui.new.items.confirm",
+                "&aCONFIRM", List.of("&fClick to confirm order", "&7(Total: ${total})"), ph));
         this.p.openInventory(this.inv);
         this.pl.cfg().play(this.p, "sounds.open", "BLOCK_CHEST_OPEN", 0.7f, 1.0f);
     }
@@ -143,19 +154,22 @@ MenuOwner {
         ChatInputManager.NewOrderSession s = this.pl.chat().session(this.p.getUniqueId());
         if (slot == 10) {
             this.pl.cfg().play(this.p, "sounds.click", "UI_BUTTON_CLICK", 1.0f, 1.0f);
-            this.p.setMetadata(META_SUPPRESS_CLOSE, (MetadataValue)new FixedMetadataValue((Plugin)this.pl, (Object)true));
+            this.p.setMetadata(META_SUPPRESS_CLOSE,
+                    (MetadataValue) new FixedMetadataValue((Plugin) this.pl, (Object) true));
             new YourOrdersMenu(this.pl, this.p).open();
             return;
         }
         if (slot == 12) {
             this.pl.cfg().play(this.p, "sounds.click", "UI_BUTTON_CLICK", 1.0f, 1.0f);
-            this.p.setMetadata(META_SUPPRESS_CLOSE, (MetadataValue)new FixedMetadataValue((Plugin)this.pl, (Object)true));
+            this.p.setMetadata(META_SUPPRESS_CLOSE,
+                    (MetadataValue) new FixedMetadataValue((Plugin) this.pl, (Object) true));
             new SelectItemMenu(this.pl, this.p).open();
             return;
         }
         if (slot == 13) {
             this.pl.cfg().play(this.p, "sounds.click", "UI_BUTTON_CLICK", 1.0f, 1.0f);
-            this.p.setMetadata(META_SUPPRESS_CLOSE, (MetadataValue)new FixedMetadataValue((Plugin)this.pl, (Object)true));
+            this.p.setMetadata(META_SUPPRESS_CLOSE,
+                    (MetadataValue) new FixedMetadataValue((Plugin) this.pl, (Object) true));
             this.p.closeInventory();
             ConfigurationSection sec = this.pl.cfg().cfg().getConfigurationSection("amount-sign");
             SignInputUtil.openFromConfig(this.pl, this.p, sec, input -> {
@@ -171,8 +185,7 @@ MenuOwner {
                 try {
                     t = t.replace(" ", "");
                     amt = Integer.parseInt(t);
-                }
-                catch (Exception ex) {
+                } catch (Exception ex) {
                     this.p.sendMessage(Utils.formatColors("&cInvalid amount. Please enter a whole number (e.g. 64)."));
                     new NewOrderMenu(this.pl, this.p).open();
                     return;
@@ -190,7 +203,8 @@ MenuOwner {
         }
         if (slot == 14) {
             this.pl.cfg().play(this.p, "sounds.click", "UI_BUTTON_CLICK", 1.0f, 1.0f);
-            this.p.setMetadata(META_SUPPRESS_CLOSE, (MetadataValue)new FixedMetadataValue((Plugin)this.pl, (Object)true));
+            this.p.setMetadata(META_SUPPRESS_CLOSE,
+                    (MetadataValue) new FixedMetadataValue((Plugin) this.pl, (Object) true));
             this.p.closeInventory();
             ConfigurationSection sec = this.pl.cfg().cfg().getConfigurationSection("price-sign");
             SignInputUtil.openFromConfig(this.pl, this.p, sec, input -> {
@@ -206,8 +220,7 @@ MenuOwner {
                 try {
                     t = t.replace(" ", "").replace(",", ".");
                     price = Double.parseDouble(t);
-                }
-                catch (Exception ex) {
+                } catch (Exception ex) {
                     this.p.sendMessage(Utils.formatColors("&cInvalid price. Please enter a number (e.g. 2.5)."));
                     new NewOrderMenu(this.pl, this.p).open();
                     return;
@@ -230,24 +243,29 @@ MenuOwner {
                 this.p.sendMessage("\u00a7cPlease set item, amount, and price first.");
                 return;
             }
-            double total = (double)s.amount.intValue() * s.priceEach;
-            if (!this.pl.vault().take((OfflinePlayer)this.p, total)) {
-                this.p.sendMessage(Utils.formatColors(this.pl.cfg().msg("messages.cannot_afford", "&cYou cannot afford this (&f${total}&c).").replace("${total}", Utils.abbr(total))));
+            double total = (double) s.amount.intValue() * s.priceEach;
+            if (!this.pl.vault().take((OfflinePlayer) this.p, total)) {
+                this.p.sendMessage(Utils.formatColors(
+                        this.pl.cfg().msg("messages.cannot_afford", "&cYou cannot afford this (&f${total}&c).")
+                                .replace("${total}", Utils.abbr(total))));
                 return;
             }
             ItemStack chosen = null;
-            if (this.p.hasMetadata(META_CHOSEN) && (obj = ((MetadataValue)this.p.getMetadata(META_CHOSEN).get(0)).value()) instanceof ItemStack) {
+            if (this.p.hasMetadata(META_CHOSEN)
+                    && (obj = ((MetadataValue) this.p.getMetadata(META_CHOSEN).get(0)).value()) instanceof ItemStack) {
                 ItemStack is;
-                chosen = is = (ItemStack)obj;
+                chosen = is = (ItemStack) obj;
             }
-            ItemKey key = chosen != null ? ItemKey.fromStack(chosen) : ItemKey.of(Material.valueOf((String)s.chosenItem));
-            this.pl.orders().create(this.p.getUniqueId(), key, (int)s.amount, (double)s.priceEach);
+            ItemKey key = chosen != null ? ItemKey.fromStack(chosen)
+                    : ItemKey.of(Material.valueOf((String) s.chosenItem));
+            this.pl.orders().create(this.p.getUniqueId(), key, (int) s.amount, (double) s.priceEach);
             this.p.playSound(this.p.getLocation(), Sound.ENTITY_EXPERIENCE_ORB_PICKUP, 1.0f, 1.2f);
             if (this.p.hasMetadata(META_CHOSEN)) {
-                this.p.removeMetadata(META_CHOSEN, (Plugin)this.pl);
+                this.p.removeMetadata(META_CHOSEN, (Plugin) this.pl);
             }
             this.pl.chat().clearSession(this.p.getUniqueId());
-            this.p.setMetadata(META_SUPPRESS_CLOSE, (MetadataValue)new FixedMetadataValue((Plugin)this.pl, (Object)true));
+            this.p.setMetadata(META_SUPPRESS_CLOSE,
+                    (MetadataValue) new FixedMetadataValue((Plugin) this.pl, (Object) true));
             new YourOrdersMenu(this.pl, this.p).open();
         }
     }
@@ -261,10 +279,10 @@ MenuOwner {
             return;
         }
         if (this.p.hasMetadata(META_SUPPRESS_CLOSE)) {
-            this.p.removeMetadata(META_SUPPRESS_CLOSE, (Plugin)this.pl);
+            this.p.removeMetadata(META_SUPPRESS_CLOSE, (Plugin) this.pl);
             return;
         }
-        TaskUtil.runEntityLater((Plugin)this.pl, (Entity)this.p, () -> new YourOrdersMenu(this.pl, this.p).open(), 1L);
+        TaskUtil.runEntityLater((Plugin) this.pl, (Entity) this.p, () -> new YourOrdersMenu(this.pl, this.p).open(),
+                1L);
     }
 }
-
