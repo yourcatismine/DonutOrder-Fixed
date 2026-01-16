@@ -43,59 +43,88 @@ import org.bukkit.plugin.Plugin;
 public class OrderManager {
     private final DonutOrder pl;
     private final Map<UUID, Order> orders = new LinkedHashMap<UUID, Order>();
-    private final File ordersFile;
-    private final YamlConfiguration ordersCfg;
-    private final File legacyFile;
+    private final File ordersDir;
 
     public OrderManager(DonutOrder pl) {
         this.pl = pl;
         if (!pl.getDataFolder().exists()) {
             pl.getDataFolder().mkdirs();
         }
-        this.ordersFile = new File(pl.getDataFolder(), "orders.db");
-        this.legacyFile = new File(pl.getDataFolder(), "saves.db");
-        if (!this.ordersFile.exists() && this.legacyFile.exists()) {
-            pl.getLogger().info("Migrating orders from saves.db -> orders.db ...");
-            YamlConfiguration legacyCfg = null;
-            try {
-                legacyCfg = YamlConfiguration.loadConfiguration((File) this.legacyFile);
-            } catch (Exception e) {
-                pl.getLogger().severe("Could not split-load saves.db: " + e.getMessage());
-            }
 
-            try {
-                this.ordersFile.createNewFile();
-            } catch (IOException iOException) {
-                // empty catch block
-            }
-            YamlConfiguration newCfg = YamlConfiguration.loadConfiguration((File) this.ordersFile);
+        // New directory for individual order files
+        this.ordersDir = new File(pl.getDataFolder(), "orders");
+        if (!this.ordersDir.exists()) {
+            this.ordersDir.mkdirs();
+        }
 
-            if (legacyCfg != null) {
-                for (String k : legacyCfg.getKeys(false)) {
-                    newCfg.set(k, legacyCfg.get(k));
-                }
+        // Migration logic: Check for old orders.db
+        File oldOrdersFile = new File(pl.getDataFolder(), "orders.db");
+        if (oldOrdersFile.exists()) {
+            pl.getLogger().info("Found legacy orders.db, migrating to individual files...");
+            YamlConfiguration oldCfg = YamlConfiguration.loadConfiguration(oldOrdersFile);
+
+            int migratedCount = 0;
+            for (String key : oldCfg.getKeys(false)) {
                 try {
-                    newCfg.save(this.ordersFile);
-                    pl.getLogger().info("Migration complete. (orders.db created)");
-                } catch (IOException ex) {
-                    pl.getLogger().severe("Failed to migrate orders to orders.db: " + ex.getMessage());
+                    // Extract data from the old monolothic file
+                    UUID id = UUID.fromString(key);
+                    String ownerStr = oldCfg.getString(key + ".owner");
+                    String itemStr = oldCfg.getString(key + ".item");
+
+                    if (ownerStr == null || itemStr == null)
+                        continue;
+
+                    Order o = new Order();
+                    o.id = id;
+                    o.owner = UUID.fromString(ownerStr);
+                    o.key = ItemKey.deserialize(itemStr);
+                    o.requested = oldCfg.getInt(key + ".requested");
+                    o.delivered = oldCfg.getInt(key + ".delivered");
+                    o.priceEach = oldCfg.getDouble(key + ".priceEach");
+                    o.paid = oldCfg.getDouble(key + ".paid");
+                    o.canceled = oldCfg.getBoolean(key + ".canceled");
+                    o.completed = oldCfg.getBoolean(key + ".completed");
+
+                    List<?> raw = oldCfg.getList(key + ".storage");
+                    if (raw != null) {
+                        for (Object ois : raw) {
+                            if (ois instanceof ItemStack) {
+                                o.storage.add((ItemStack) ois);
+                            }
+                        }
+                    }
+
+                    // Put in map and save to new individual file
+                    this.orders.put(o.id, o);
+                    this.saveOrder(o);
+                    migratedCount++;
+
+                } catch (Exception e) {
+                    pl.getLogger().severe("Failed to migrate order " + key + ": " + e.getMessage());
                 }
             }
-        }
-        if (!this.ordersFile.exists()) {
-            try {
-                this.ordersFile.createNewFile();
-            } catch (IOException ex) {
-                pl.getLogger().severe("Could not create orders.db: " + ex.getMessage());
+
+            pl.getLogger().info("Migrated " + migratedCount + " orders.");
+
+            // Rename old file to prevent re-migration
+            File backup = new File(pl.getDataFolder(), "orders.db.bak");
+            if (oldOrdersFile.renameTo(backup)) {
+                pl.getLogger().info("Renamed orders.db to orders.db.bak");
+            } else {
+                pl.getLogger().warning("Could not rename orders.db! Please remove it manually.");
             }
         }
-        YamlConfiguration tmp = new YamlConfiguration();
-        try {
-            tmp = YamlConfiguration.loadConfiguration((File) this.ordersFile);
-        } catch (Exception e) {
-            pl.getLogger().severe("Could not load orders.db: " + e.getMessage());
+
+        // Check for even older saves.db (from original code, just in case)
+        File legacyFile = new File(pl.getDataFolder(), "saves.db");
+        if (legacyFile.exists() && !oldOrdersFile.exists() && this.ordersDir.list().length == 0) {
+            // Handle extremely old migration if needed, or just ignore since we handled
+            // orders.db
+            // For safety, let's just log a warning if it exists but we didn't migrate from
+            // orders.db
+            pl.getLogger().info("Found ancient saves.db but no orders.db. Ignoring for now as we use new system.");
         }
-        this.ordersCfg = tmp;
+
         this.loadAll();
     }
 
@@ -120,7 +149,6 @@ public class OrderManager {
         o.completed = false;
         this.orders.put(o.id, o);
         this.saveOrder(o);
-        this.saveRoot();
         return o;
     }
 
@@ -135,7 +163,6 @@ public class OrderManager {
         o.requested = o.delivered;
         o.completed = true;
         this.saveOrder(o);
-        this.saveRoot();
     }
 
     public void applyDelivery(Order o, List<ItemStack> accepted, int acceptedAmount, UUID deliverer) {
@@ -158,7 +185,6 @@ public class OrderManager {
         }
         o.paid = Math.max(0.0, o.totalPrice() - (double) o.delivered * o.priceEach);
         this.saveOrder(o);
-        this.saveRoot();
         this.sendReceiverActionbar(o, deliverer, acceptedAmount);
     }
 
@@ -192,70 +218,102 @@ public class OrderManager {
 
     private void loadAll() {
         this.orders.clear();
-        java.util.Set<String> keys = this.ordersCfg.getKeys(false);
-        if (keys == null)
+        if (!ordersDir.exists())
             return;
-        for (String key : keys) {
+
+        File[] files = ordersDir.listFiles((dir, name) -> name.endsWith(".yml"));
+        if (files == null)
+            return;
+
+        for (File f : files) {
             try {
-                if (key == null)
+                YamlConfiguration cfg = YamlConfiguration.loadConfiguration(f);
+
+                // The root of the file is the order itself now, not key-nested
+                // However, preserving the simpler key-value structure inside might be easier?
+                // Actually, cleaner is just to set keys at root.
+                // Let's assume the saveOrder method saves at root.
+
+                String idStr = f.getName().replace(".yml", "");
+                UUID id;
+                try {
+                    id = UUID.fromString(idStr);
+                } catch (IllegalArgumentException e) {
+                    // Try to read 'id' from inside if filename is weird, or skip
+                    String internalId = cfg.getString("id");
+                    if (internalId != null) {
+                        id = UUID.fromString(internalId);
+                    } else {
+                        pl.getLogger().warning("Skipping invalid order file: " + f.getName());
+                        continue;
+                    }
+                }
+
+                String ownerStr = cfg.getString("owner");
+                String itemStr = cfg.getString("item");
+
+                if (ownerStr == null || itemStr == null) {
+                    // Attempt legacy migration for format if it was saved strangely?
+                    // No, this is fresh load of new files.
                     continue;
-                UUID id = UUID.fromString(key);
-                String ownerStr = this.ordersCfg.getString(key + ".owner");
-                String itemStr = this.ordersCfg.getString(key + ".item");
-                if (ownerStr == null || itemStr == null)
-                    continue;
+                }
+
                 Order o = new Order();
                 o.id = id;
                 o.owner = UUID.fromString(ownerStr);
                 o.key = ItemKey.deserialize(itemStr);
-                o.requested = this.ordersCfg.getInt(key + ".requested");
-                o.delivered = this.ordersCfg.getInt(key + ".delivered");
-                o.priceEach = this.ordersCfg.getDouble(key + ".priceEach");
-                o.paid = this.ordersCfg.getDouble(key + ".paid");
-                o.canceled = this.ordersCfg.getBoolean(key + ".canceled");
-                o.completed = this.ordersCfg.getBoolean(key + ".completed");
-                List raw = this.ordersCfg.getList(key + ".storage");
+                o.requested = cfg.getInt("requested");
+                o.delivered = cfg.getInt("delivered");
+                o.priceEach = cfg.getDouble("priceEach");
+                o.paid = cfg.getDouble("paid");
+                o.canceled = cfg.getBoolean("canceled");
+                o.completed = cfg.getBoolean("completed");
+
+                List<?> raw = cfg.getList("storage");
                 if (raw != null) {
                     for (Object ois : raw) {
-                        if (!(ois instanceof ItemStack))
-                            continue;
-                        ItemStack is = (ItemStack) ois;
-                        o.storage.add(is);
+                        if (ois instanceof ItemStack) {
+                            o.storage.add((ItemStack) ois);
+                        }
                     }
                 }
                 this.orders.put(o.id, o);
             } catch (Exception ex) {
-                this.pl.getLogger().warning("Skipping corrupt order entry '" + key + "': " + ex.getMessage());
+                this.pl.getLogger().warning("Skipping corrupt order file '" + f.getName() + "': " + ex.getMessage());
             }
         }
     }
 
-    private void saveOrder(Order o) {
-        String k = o.id.toString();
-        this.ordersCfg.set(k + ".owner", (Object) o.owner.toString());
-        this.ordersCfg.set(k + ".item", (Object) o.key.serialize());
-        this.ordersCfg.set(k + ".requested", (Object) o.requested);
-        this.ordersCfg.set(k + ".delivered", (Object) o.delivered);
-        this.ordersCfg.set(k + ".priceEach", (Object) o.priceEach);
-        this.ordersCfg.set(k + ".paid", (Object) o.paid);
-        this.ordersCfg.set(k + ".canceled", (Object) o.canceled);
-        this.ordersCfg.set(k + ".completed", (Object) o.completed);
-        this.ordersCfg.set(k + ".storage", o.storage);
+    public void saveOrder(Order o) {
+        File f = new File(ordersDir, o.id.toString() + ".yml");
+        YamlConfiguration cfg = new YamlConfiguration();
+
+        cfg.set("id", o.id.toString()); // Save ID just in case
+        cfg.set("owner", o.owner.toString());
+        cfg.set("item", o.key.serialize());
+        cfg.set("requested", o.requested);
+        cfg.set("delivered", o.delivered);
+        cfg.set("priceEach", o.priceEach);
+        cfg.set("paid", o.paid);
+        cfg.set("canceled", o.canceled);
+        cfg.set("completed", o.completed);
+        cfg.set("storage", o.storage);
+
+        try {
+            cfg.save(f);
+        } catch (IOException ex) {
+            pl.getLogger().severe("Failed to save order " + o.id + ": " + ex.getMessage());
+        }
     }
 
     public void saveAll() {
         for (Order o : this.orders.values()) {
             this.saveOrder(o);
         }
-        this.saveRoot();
     }
 
     private void saveRoot() {
-        try {
-            this.ordersCfg.save(this.ordersFile);
-        } catch (IOException ex) {
-            this.pl.getLogger().severe("Failed to save orders.yml: " + ex.getMessage());
-        }
+        // Deprecated/Unused in new system
     }
 
     public static String nice(Material m) {
