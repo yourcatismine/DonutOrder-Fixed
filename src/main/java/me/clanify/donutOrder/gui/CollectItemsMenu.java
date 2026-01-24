@@ -45,8 +45,8 @@ import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.plugin.Plugin;
 
 public class CollectItemsMenu
-implements InventoryHolder,
-MenuOwner {
+        implements InventoryHolder,
+        MenuOwner {
     private final DonutOrder pl;
     private final Player p;
     private final Order order;
@@ -54,6 +54,8 @@ MenuOwner {
     private final int requestedPage;
     private int currentPage = 0;
     private boolean internalPageSwitch = false;
+    private long lastClickTime = 0;
+    private static final long CLICK_COOLDOWN_MS = 200; // 200ms cooldown between clicks
 
     public CollectItemsMenu(DonutOrder pl, Player p, Order order) {
         this(pl, p, order, 0);
@@ -92,12 +94,14 @@ MenuOwner {
         int per = this.perPage();
         int max = this.maxPage();
         this.currentPage = Math.max(0, Math.min(this.requestedPage, max));
-        this.inv = Bukkit.createInventory((InventoryHolder)this, (int)(rows * 9), (String)this.pl.cfg().title("collect", "&#44b3ffOrders -> Collect Items"));
+        this.inv = Bukkit.createInventory((InventoryHolder) this, (int) (rows * 9),
+                (String) this.pl.cfg().title("collect", "&#44b3ffOrders -> Collect Items"));
         int from = Math.max(0, Math.min(this.order.storage.size(), this.currentPage * per));
         int to = Math.min(this.order.storage.size(), from + per);
         for (int i = from; i < to; ++i) {
             ItemStack st = this.order.storage.get(i);
-            if (st == null || st.getType() == Material.AIR) continue;
+            if (st == null || st.getType() == Material.AIR)
+                continue;
             this.inv.setItem(i - from, st.clone());
         }
         int prev = (rows - 1) * 9;
@@ -105,7 +109,8 @@ MenuOwner {
         int drop = rows * 9 - 2;
         this.inv.setItem(prev, this.pl.cfg().button("gui.collect.items.prev", "ARROW", "&fPrevious Page", List.of()));
         this.inv.setItem(next, this.pl.cfg().button("gui.collect.items.next", "ARROW", "&fNext Page", List.of()));
-        this.inv.setItem(drop, this.pl.cfg().button("gui.collect.items.drop", "DROPPER", "&fDROP LOOT", List.of("&fClick to drop all loot on the page")));
+        this.inv.setItem(drop, this.pl.cfg().button("gui.collect.items.drop", "DROPPER", "&fDROP LOOT",
+                List.of("&fClick to drop all loot on the page")));
         ItemStack fill = new ItemStack(Material.GRAY_STAINED_GLASS_PANE);
         ItemMeta meta = fill.getItemMeta();
         if (meta != null) {
@@ -113,7 +118,8 @@ MenuOwner {
             fill.setItemMeta(meta);
         }
         for (int s = (rows - 1) * 9; s < rows * 9; ++s) {
-            if (this.inv.getItem(s) != null) continue;
+            if (this.inv.getItem(s) != null)
+                continue;
             this.inv.setItem(s, fill);
         }
         this.p.openInventory(this.inv);
@@ -130,36 +136,46 @@ MenuOwner {
         int next = rows * 9 - 1;
         int drop = rows * 9 - 2;
         Inventory top = e.getView().getTopInventory();
-        boolean clickedTop = e.getClickedInventory() != null && e.getClickedInventory().equals((Object)top);
+        boolean clickedTop = e.getClickedInventory() != null && e.getClickedInventory().equals((Object) top);
         boolean clickedPlayer = e.getClickedInventory() != null && e.getClickedInventory().getHolder() == this.p;
         int slot = e.getSlot();
         if (clickedTop && slot >= (rows - 1) * 9) {
             e.setCancelled(true);
+            // Prevent spam clicking
+            long now = System.currentTimeMillis();
+            if (now - lastClickTime < CLICK_COOLDOWN_MS) {
+                return;
+            }
+            lastClickTime = now;
+
             if (slot == prev) {
                 int prevPage = Math.max(0, this.currentPage - 1);
                 this.pl.cfg().play(this.p, "sounds.page", "UI_BUTTON_CLICK", 1.0f, 1.1f);
                 this.flushCurrentPageToStorage();
-                this.pl.orders().saveAll();
+                this.pl.orders().saveOrder(this.order);
                 this.internalPageSwitch = true;
-                TaskUtil.runEntityLater((Plugin)this.pl, (Entity)this.p, () -> new CollectItemsMenu(this.pl, this.p, this.order, prevPage).open(), 1L);
+                TaskUtil.runEntityLater((Plugin) this.pl, (Entity) this.p,
+                        () -> new CollectItemsMenu(this.pl, this.p, this.order, prevPage).open(), 1L);
                 return;
             }
             if (slot == next) {
                 int nextPage = Math.min(this.maxPage(), this.currentPage + 1);
                 this.pl.cfg().play(this.p, "sounds.page", "UI_BUTTON_CLICK", 1.0f, 1.1f);
                 this.flushCurrentPageToStorage();
-                this.pl.orders().saveAll();
+                this.pl.orders().saveOrder(this.order);
                 this.internalPageSwitch = true;
-                TaskUtil.runEntityLater((Plugin)this.pl, (Entity)this.p, () -> new CollectItemsMenu(this.pl, this.p, this.order, nextPage).open(), 1L);
+                TaskUtil.runEntityLater((Plugin) this.pl, (Entity) this.p,
+                        () -> new CollectItemsMenu(this.pl, this.p, this.order, nextPage).open(), 1L);
                 return;
             }
             if (slot == drop) {
                 this.dropCurrentPageInGui();
                 this.flushCurrentPageToStorage();
-                this.pl.orders().saveAll();
+                this.pl.orders().saveOrder(this.order);
                 this.pl.cfg().play(this.p, "sounds.click", "UI_BUTTON_CLICK", 1.0f, 1.0f);
                 this.internalPageSwitch = true;
-                TaskUtil.runEntityLater((Plugin)this.pl, (Entity)this.p, () -> new CollectItemsMenu(this.pl, this.p, this.order, this.currentPage).open(), 1L);
+                TaskUtil.runEntityLater((Plugin) this.pl, (Entity) this.p,
+                        () -> new CollectItemsMenu(this.pl, this.p, this.order, this.currentPage).open(), 1L);
                 return;
             }
             return;
@@ -177,11 +193,11 @@ MenuOwner {
             }
             InventoryAction a = e.getAction();
             switch (a) {
-                case PLACE_ALL: 
-                case PLACE_SOME: 
-                case PLACE_ONE: 
-                case SWAP_WITH_CURSOR: 
-                case HOTBAR_SWAP: 
+                case PLACE_ALL:
+                case PLACE_SOME:
+                case PLACE_ONE:
+                case SWAP_WITH_CURSOR:
+                case HOTBAR_SWAP:
                 case HOTBAR_MOVE_AND_READD: {
                     e.setCancelled(true);
                     return;
@@ -207,12 +223,13 @@ MenuOwner {
         int controlStart = (rows - 1) * 9;
         Iterator iterator = e.getRawSlots().iterator();
         while (iterator.hasNext()) {
-            int raw = (Integer)iterator.next();
+            int raw = (Integer) iterator.next();
             if (raw >= 0 && raw < controlStart) {
                 e.setCancelled(true);
                 return;
             }
-            if (raw < controlStart || raw >= topSize) continue;
+            if (raw < controlStart || raw >= topSize)
+                continue;
             e.setCancelled(true);
             return;
         }
@@ -228,11 +245,13 @@ MenuOwner {
             return;
         }
         this.flushCurrentPageToStorage();
-        this.pl.orders().saveAll();
+        this.pl.orders().saveOrder(this.order);
         if (this.order.completed && this.order.storage.isEmpty()) {
-            TaskUtil.runEntityLater((Plugin)this.pl, (Entity)this.p, () -> new YourOrdersMenu(this.pl, this.p).open(), 1L);
+            TaskUtil.runEntityLater((Plugin) this.pl, (Entity) this.p, () -> new YourOrdersMenu(this.pl, this.p).open(),
+                    1L);
         } else {
-            TaskUtil.runEntityLater((Plugin)this.pl, (Entity)this.p, () -> new EditOrderMenu(this.pl, this.p, this.order).open(), 1L);
+            TaskUtil.runEntityLater((Plugin) this.pl, (Entity) this.p,
+                    () -> new EditOrderMenu(this.pl, this.p, this.order).open(), 1L);
         }
     }
 
@@ -245,12 +264,14 @@ MenuOwner {
         int from = this.currentPage * per;
         int maxRem = Math.min(per, Math.max(0, this.order.storage.size() - from));
         for (i = 0; i < maxRem; ++i) {
-            if (from >= this.order.storage.size()) continue;
+            if (from >= this.order.storage.size())
+                continue;
             this.order.storage.remove(from);
         }
         for (i = 0; i < per && i < this.inv.getSize(); ++i) {
             ItemStack cur = this.inv.getItem(i);
-            if (cur == null || cur.getType() == Material.AIR || cur.getAmount() <= 0) continue;
+            if (cur == null || cur.getType() == Material.AIR || cur.getAmount() <= 0)
+                continue;
             this.order.storage.add(Math.min(from + i, this.order.storage.size()), cur.clone());
         }
         this.order.storage.removeIf(it -> it == null || it.getType() == Material.AIR || it.getAmount() <= 0);
@@ -261,11 +282,11 @@ MenuOwner {
         Location eye = this.p.getEyeLocation();
         for (int i = 0; i < per; ++i) {
             ItemStack cur = this.inv.getItem(i);
-            if (cur == null || cur.getType() == Material.AIR) continue;
+            if (cur == null || cur.getType() == Material.AIR)
+                continue;
             this.inv.clear(i);
             Item drop = this.p.getWorld().dropItem(eye, cur);
             drop.setVelocity(eye.getDirection().multiply(0.25));
         }
     }
 }
-
