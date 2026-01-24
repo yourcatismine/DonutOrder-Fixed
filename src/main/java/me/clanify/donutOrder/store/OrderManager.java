@@ -15,8 +15,12 @@
  */
 package me.clanify.donutOrder.store;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -39,6 +43,8 @@ import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.plugin.Plugin;
+import org.bukkit.util.io.BukkitObjectInputStream;
+import org.bukkit.util.io.BukkitObjectOutputStream;
 
 public class OrderManager {
     private final DonutOrder pl;
@@ -51,78 +57,10 @@ public class OrderManager {
             pl.getDataFolder().mkdirs();
         }
 
-        // New directory for individual order files
+        // Individual order files directory
         this.ordersDir = new File(pl.getDataFolder(), "orders");
         if (!this.ordersDir.exists()) {
             this.ordersDir.mkdirs();
-        }
-
-        // Migration logic: Check for old orders.db
-        File oldOrdersFile = new File(pl.getDataFolder(), "orders.db");
-        if (oldOrdersFile.exists()) {
-            pl.getLogger().info("Found legacy orders.db, migrating to individual files...");
-            YamlConfiguration oldCfg = YamlConfiguration.loadConfiguration(oldOrdersFile);
-
-            int migratedCount = 0;
-            for (String key : oldCfg.getKeys(false)) {
-                try {
-                    // Extract data from the old monolothic file
-                    UUID id = UUID.fromString(key);
-                    String ownerStr = oldCfg.getString(key + ".owner");
-                    String itemStr = oldCfg.getString(key + ".item");
-
-                    if (ownerStr == null || itemStr == null)
-                        continue;
-
-                    Order o = new Order();
-                    o.id = id;
-                    o.owner = UUID.fromString(ownerStr);
-                    o.key = ItemKey.deserialize(itemStr);
-                    o.requested = oldCfg.getInt(key + ".requested");
-                    o.delivered = oldCfg.getInt(key + ".delivered");
-                    o.priceEach = oldCfg.getDouble(key + ".priceEach");
-                    o.paid = oldCfg.getDouble(key + ".paid");
-                    o.canceled = oldCfg.getBoolean(key + ".canceled");
-                    o.completed = oldCfg.getBoolean(key + ".completed");
-
-                    List<?> raw = oldCfg.getList(key + ".storage");
-                    if (raw != null) {
-                        for (Object ois : raw) {
-                            if (ois instanceof ItemStack) {
-                                o.storage.add((ItemStack) ois);
-                            }
-                        }
-                    }
-
-                    // Put in map and save to new individual file
-                    this.orders.put(o.id, o);
-                    this.saveOrder(o);
-                    migratedCount++;
-
-                } catch (Exception e) {
-                    pl.getLogger().severe("Failed to migrate order " + key + ": " + e.getMessage());
-                }
-            }
-
-            pl.getLogger().info("Migrated " + migratedCount + " orders.");
-
-            // Rename old file to prevent re-migration
-            File backup = new File(pl.getDataFolder(), "orders.db.bak");
-            if (oldOrdersFile.renameTo(backup)) {
-                pl.getLogger().info("Renamed orders.db to orders.db.bak");
-            } else {
-                pl.getLogger().warning("Could not rename orders.db! Please remove it manually.");
-            }
-        }
-
-        // Check for even older saves.db (from original code, just in case)
-        File legacyFile = new File(pl.getDataFolder(), "saves.db");
-        if (legacyFile.exists() && !oldOrdersFile.exists() && this.ordersDir.list().length == 0) {
-            // Handle extremely old migration if needed, or just ignore since we handled
-            // orders.db
-            // For safety, let's just log a warning if it exists but we didn't migrate from
-            // orders.db
-            pl.getLogger().info("Found ancient saves.db but no orders.db. Ignoring for now as we use new system.");
         }
 
         this.loadAll();
@@ -269,10 +207,18 @@ public class OrderManager {
                 o.canceled = cfg.getBoolean("canceled");
                 o.completed = cfg.getBoolean("completed");
 
+                // Load storage - support both legacy ItemStack format and new Base64 format
                 List<?> raw = cfg.getList("storage");
                 if (raw != null) {
                     for (Object ois : raw) {
-                        if (ois instanceof ItemStack) {
+                        if (ois instanceof String) {
+                            // New Base64 format
+                            ItemStack item = itemFromBase64((String) ois);
+                            if (item != null) {
+                                o.storage.add(item);
+                            }
+                        } else if (ois instanceof ItemStack) {
+                            // Legacy format
                             o.storage.add((ItemStack) ois);
                         }
                     }
@@ -285,25 +231,51 @@ public class OrderManager {
     }
 
     public void saveOrder(Order o) {
-        File f = new File(ordersDir, o.id.toString() + ".yml");
-        YamlConfiguration cfg = new YamlConfiguration();
-
-        cfg.set("id", o.id.toString()); // Save ID just in case
-        cfg.set("owner", o.owner.toString());
-        cfg.set("item", o.key.serialize());
-        cfg.set("requested", o.requested);
-        cfg.set("delivered", o.delivered);
-        cfg.set("priceEach", o.priceEach);
-        cfg.set("paid", o.paid);
-        cfg.set("canceled", o.canceled);
-        cfg.set("completed", o.completed);
-        cfg.set("storage", o.storage);
-
-        try {
-            cfg.save(f);
-        } catch (IOException ex) {
-            pl.getLogger().severe("Failed to save order " + o.id + ": " + ex.getMessage());
+        // Serialize storage to Base64 on main thread (fast), then save async
+        List<String> storageBase64 = new ArrayList<>();
+        for (ItemStack item : o.storage) {
+            if (item != null && item.getType() != Material.AIR) {
+                String encoded = itemToBase64(item);
+                if (encoded != null) {
+                    storageBase64.add(encoded);
+                }
+            }
         }
+
+        // Capture all order data for async save
+        final UUID orderId = o.id;
+        final String ownerStr = o.owner.toString();
+        final String itemStr = o.key.serialize();
+        final int requested = o.requested;
+        final int delivered = o.delivered;
+        final double priceEach = o.priceEach;
+        final double paid = o.paid;
+        final boolean canceled = o.canceled;
+        final boolean completed = o.completed;
+        final List<String> storageCopy = new ArrayList<>(storageBase64);
+
+        // Run file I/O async to prevent main thread blocking
+        Bukkit.getScheduler().runTaskAsynchronously(pl, () -> {
+            File f = new File(ordersDir, orderId.toString() + ".yml");
+            YamlConfiguration cfg = new YamlConfiguration();
+
+            cfg.set("id", orderId.toString());
+            cfg.set("owner", ownerStr);
+            cfg.set("item", itemStr);
+            cfg.set("requested", requested);
+            cfg.set("delivered", delivered);
+            cfg.set("priceEach", priceEach);
+            cfg.set("paid", paid);
+            cfg.set("canceled", canceled);
+            cfg.set("completed", completed);
+            cfg.set("storage", storageCopy);
+
+            try {
+                cfg.save(f);
+            } catch (IOException ex) {
+                pl.getLogger().severe("Failed to save order " + orderId + ": " + ex.getMessage());
+            }
+        });
     }
 
     public void saveAll() {
@@ -314,6 +286,40 @@ public class OrderManager {
 
     private void saveRoot() {
         // Deprecated/Unused in new system
+    }
+
+    /**
+     * Serialize an ItemStack to a Base64 string.
+     */
+    private static String itemToBase64(ItemStack item) {
+        if (item == null)
+            return null;
+        try {
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            BukkitObjectOutputStream oos = new BukkitObjectOutputStream(baos);
+            oos.writeObject(item);
+            oos.close();
+            return Base64.getEncoder().encodeToString(baos.toByteArray());
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
+     * Deserialize an ItemStack from a Base64 string.
+     */
+    private static ItemStack itemFromBase64(String base64) {
+        if (base64 == null || base64.isEmpty())
+            return null;
+        try {
+            ByteArrayInputStream bais = new ByteArrayInputStream(Base64.getDecoder().decode(base64));
+            BukkitObjectInputStream ois = new BukkitObjectInputStream(bais);
+            ItemStack item = (ItemStack) ois.readObject();
+            ois.close();
+            return item;
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     public static String nice(Material m) {
