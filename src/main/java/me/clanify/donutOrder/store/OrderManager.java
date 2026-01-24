@@ -231,14 +231,11 @@ public class OrderManager {
     }
 
     public void saveOrder(Order o) {
-        // Serialize storage to Base64 on main thread (fast), then save async
-        List<String> storageBase64 = new ArrayList<>();
+        // Clone items on main thread (fast) for thread safety, then serialize async
+        List<ItemStack> storageClone = new ArrayList<>();
         for (ItemStack item : o.storage) {
             if (item != null && item.getType() != Material.AIR) {
-                String encoded = itemToBase64(item);
-                if (encoded != null) {
-                    storageBase64.add(encoded);
-                }
+                storageClone.add(item.clone());
             }
         }
 
@@ -252,10 +249,18 @@ public class OrderManager {
         final double paid = o.paid;
         final boolean canceled = o.canceled;
         final boolean completed = o.completed;
-        final List<String> storageCopy = new ArrayList<>(storageBase64);
 
-        // Run file I/O async to prevent main thread blocking
+        // Run EVERYTHING async - including Base64 serialization
         Bukkit.getScheduler().runTaskAsynchronously(pl, () -> {
+            // Serialize items to Base64 on async thread
+            List<String> storageBase64 = new ArrayList<>();
+            for (ItemStack item : storageClone) {
+                String encoded = itemToBase64(item);
+                if (encoded != null) {
+                    storageBase64.add(encoded);
+                }
+            }
+
             File f = new File(ordersDir, orderId.toString() + ".yml");
             YamlConfiguration cfg = new YamlConfiguration();
 
@@ -268,7 +273,7 @@ public class OrderManager {
             cfg.set("paid", paid);
             cfg.set("canceled", canceled);
             cfg.set("completed", completed);
-            cfg.set("storage", storageCopy);
+            cfg.set("storage", storageBase64);
 
             try {
                 cfg.save(f);
